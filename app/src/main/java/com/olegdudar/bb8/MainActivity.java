@@ -12,16 +12,26 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.util.Log;
 import android.util.SparseArray;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.view.Window;
+import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
-public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCallback{
+import com.orbotix.ConvenienceRobot;
+import com.orbotix.common.DiscoveryException;
+import com.orbotix.common.Robot;
+import com.orbotix.common.RobotChangedStateListener;
+import com.robot.DualStackDiscoveryAgent;
+import com.robot.RobotBB;
+
+public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCallback, RobotChangedStateListener{
     private static final String TAG = "BluetoothGattActivity";
 
     private static final String DEVICE_NAME = "BB-";
@@ -34,6 +44,14 @@ public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCa
     private ProgressDialog mProgress;
 
     private TextView mac_Address;
+    private Button connect_button;
+
+    private BluetoothDevice bb_8;
+
+
+    protected final Handler _mainThreadHandler = new Handler(Looper.getMainLooper());
+
+    private ConvenienceRobot mRobot;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,6 +63,37 @@ public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCa
         mac_Address = (TextView) findViewById(R.id.device_mac);
         mac_Address.setText("Please search for device");
 
+        connect_button = (Button) findViewById(R.id.btn_connect);
+        connect_button.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if(bb_8 != null) {
+                    Robot robot = startDiscovery(bb_8);
+
+                    if( robot instanceof RobotBB) {
+                        ( (RobotBB) robot ).setDeveloperMode( true );
+                    }
+
+                    //Save the robot as a ConvenienceRobot for additional utility methods
+                    mRobot = new ConvenienceRobot( robot );
+
+
+                    mRobot.setLed(0f, 1f, 0f);
+
+                    mRobot.calibrating(true);
+                    mRobot.calibrating(false);
+                    //Start blinking the robot's LED
+                    //blink( false );
+
+
+                }
+                else
+                    startDiscovery();
+            }
+        });
+
+        connect_button.setVisibility(View.INVISIBLE);
+
         /*
          * Bluetooth in Android 4.3 is accessed via the BluetoothManager, rather than
          * the old static BluetoothAdapter.getInstance()
@@ -53,6 +102,8 @@ public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCa
         mBluetoothAdapter = manager.getAdapter();
 
         mDevices = new SparseArray<BluetoothDevice>();
+
+        DualStackDiscoveryAgent.getInstance().addRobotStateListener( this );
 
         /*
          * A progress dialog will be needed while the connection process is
@@ -109,6 +160,7 @@ public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCa
             mConnectedGatt.disconnect();
             mConnectedGatt = null;
         }
+        mRobot.disconnect();
     }
 
     @Override
@@ -135,7 +187,9 @@ public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCa
                 //Obtain the discovered device to connect with
                 BluetoothDevice device = mDevices.get(item.getItemId());
                 Log.i(TAG, "Connecting to "+device.getName());
-                mac_Address.setText("BB-8 MAC: "+device.getAddress());
+                mac_Address.setText("BB-8 MAC: " + device.getAddress());
+                connect_button.setVisibility(View.VISIBLE);
+                bb_8 = device;
                 return super.onOptionsItemSelected(item);
         }
     }
@@ -169,6 +223,7 @@ public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCa
 
     @Override
     public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
+
         Log.i(TAG, "New LE Device: " + device.getName() + " @ " + rssi);
         /*
          * We are looking for SensorTag devices only, so validate the name
@@ -179,6 +234,10 @@ public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCa
             //Update the overflow menu
             invalidateOptionsMenu();
             mac_Address.setText("BB-8 discovered!");
+//            RobotBB bb8 = new RobotBB(device, new RobotRadioDescriptor(), this._mainThreadHandler);
+//            ( (RobotBB) bb8 ).setDeveloperMode(true);
+//            mRobot = new ConvenienceRobot( bb8 );
+//            boolean a = mRobot.isConnected();
         }
     }
 
@@ -226,4 +285,77 @@ public class MainActivity extends Activity  implements BluetoothAdapter.LeScanCa
             }
         }
     };
+
+    @Override
+    public void handleRobotChangedState(Robot robot, RobotChangedStateNotificationType type) {
+        if( robot instanceof RobotBB) {
+            ( (RobotBB) robot ).setDeveloperMode( true );
+        }
+
+        //Save the robot as a ConvenienceRobot for additional utility methods
+        mRobot = new ConvenienceRobot( robot );
+
+        //Start blinking the robot's LED
+        blink( false );
+//        switch( type ) {
+//            case Online: {
+//
+//                //If robot uses Bluetooth LE, Developer Mode can be turned on.
+//                //This turns off DOS protection. This generally isn't required.
+//                if( robot instanceof RobotBB) {
+//                    ( (RobotBB) robot ).setDeveloperMode( true );
+//                }
+//
+//                //Save the robot as a ConvenienceRobot for additional utility methods
+//                mRobot = new ConvenienceRobot( robot );
+//
+//                //Start blinking the robot's LED
+//                blink( false );
+//                break;
+//            }
+//        }
+    }
+
+    //Turn the robot LED on or off every two seconds
+    private void blink( final boolean lit ) {
+        if( mRobot == null )
+            return;
+
+        if( lit ) {
+            mRobot.setLed( 0.0f, 0.0f, 0.0f );
+        } else {
+            mRobot.setLed( 0.0f, 0.0f, 1.0f );
+        }
+
+        final Handler handler = new Handler();
+        handler.postDelayed(new Runnable() {
+            public void run() {
+                blink(!lit);
+            }
+        }, 2000);
+    }
+
+    private void startDiscovery() {
+        //If the DiscoveryAgent is not already looking for robots, start discovery.
+        if( !DualStackDiscoveryAgent.getInstance().isDiscovering() ) {
+            try {
+                DualStackDiscoveryAgent.getInstance().startDiscovery(getApplicationContext());
+            } catch (DiscoveryException e) {
+                Log.e("Sphero", "DiscoveryException: " + e.getMessage());
+            }
+        }
+    }
+
+    private Robot startDiscovery(BluetoothDevice device) {
+        //If the DiscoveryAgent is not already looking for robots, start discovery.
+        Robot robot = null;
+        if( !DualStackDiscoveryAgent.getInstance().isDiscovering() ) {
+            try {
+                robot = DualStackDiscoveryAgent.getInstance().startDiscovery(getApplicationContext(), device);
+            } catch (DiscoveryException e) {
+                Log.e("Sphero", "DiscoveryException: " + e.getMessage());
+            }
+        }
+        return robot;
+    }
 }
